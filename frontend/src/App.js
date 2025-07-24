@@ -1,7 +1,79 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import CytoscapeComponent from 'react-cytoscapejs';
 
 const API = 'http://localhost:4000';
+
+function UserGraph() {
+  const [elements, setElements] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch(`${API}/graph`)
+      .then(res => res.json())
+      .then(data => {
+        // Convert nodes and edges to Cytoscape format
+        const cyElements = [
+          ...data.nodes.map(n => ({ data: n })),
+          ...data.edges.map(e => ({ data: e })),
+        ];
+        setElements(cyElements);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError('Failed to load graph');
+        setLoading(false);
+      });
+  }, []);
+
+  const layout = { name: 'circle' };
+  const style = [
+    {
+      selector: 'node',
+      style: {
+        label: 'data(label)',
+        'background-color': '#0074D9',
+        color: '#fff',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': 16,
+        width: 50,
+        height: 50,
+      },
+    },
+    {
+      selector: 'edge',
+      style: {
+        label: 'data(label)',
+        'curve-style': 'bezier',
+        'target-arrow-shape': 'triangle',
+        'line-color': '#aaa',
+        'target-arrow-color': '#aaa',
+        'font-size': 12,
+        'text-background-color': '#fff',
+        'text-background-opacity': 1,
+        'text-background-padding': 2,
+      },
+    },
+  ];
+
+  if (loading) return <div>Loading graph...</div>;
+  if (error) return <div>{error}</div>;
+  if (!elements.length) return <div>No user graph data.</div>;
+
+  return (
+    <div style={{ margin: '32px auto', maxWidth: 650, background: '#f8fafc', borderRadius: 12, padding: 24 }}>
+      <h2 style={{ textAlign: 'center' }}>User Friendship Graph</h2>
+      <CytoscapeComponent
+        elements={elements}
+        style={{ width: '600px', height: '600px' }}
+        layout={layout}
+        stylesheet={style}
+      />
+    </div>
+  );
+}
 
 function App() {
   const [users, setUsers] = useState([]);
@@ -11,6 +83,7 @@ function App() {
   const [selectedUser, setSelectedUser] = useState('');
   const [friends, setFriends] = useState([]);
   const [fofs, setFofs] = useState([]);
+  const [showGraph, setShowGraph] = useState(false);
 
   // Fetch users
   useEffect(() => {
@@ -107,6 +180,10 @@ function App() {
           </ul>
         </div>
       )}
+      <button style={{ margin: '24px 0', background: '#0074D9' }} onClick={() => setShowGraph(g => !g)}>
+        {showGraph ? 'Hide' : 'Show'} User Friendship Graph
+      </button>
+      {showGraph && <UserGraph />}
     </div>
   );
 }

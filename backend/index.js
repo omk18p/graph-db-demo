@@ -72,6 +72,25 @@ app.get('/friends/:name', async (req, res) => {
   }
 });
 
+// Add this endpoint to return the full user-friend graph
+app.get('/graph', async (req, res) => {
+  try {
+    // Get all users
+    const usersResult = await session.run('MATCH (u:User) RETURN u.name AS name');
+    const nodes = usersResult.records.map(r => ({ id: r.get('name'), label: r.get('name') }));
+
+    // Get all friendships (undirected, unique pairs)
+    const edgesResult = await session.run(
+      'MATCH (a:User)-[:FRIEND]->(b:User) WHERE a.name < b.name RETURN a.name AS source, b.name AS target'
+    );
+    const edges = edgesResult.records.map(r => ({ source: r.get('source'), target: r.get('target'), label: 'friend' }));
+
+    res.json({ nodes, edges });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Delete a user and all their friendships
 app.delete('/users/:name', async (req, res) => {
   const { name } = req.params;
