@@ -8,12 +8,14 @@ function UserGraph() {
   const [elements, setElements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedNodes, setSelectedNodes] = useState([]); // store selected node ids
+  const [shortestPath, setShortestPath] = useState([]); // store ids of nodes/edges in path
+  const cyRef = React.useRef(null);
 
   useEffect(() => {
     fetch(`${API}/graph`)
       .then(res => res.json())
       .then(data => {
-        // Convert nodes and edges to Cytoscape format
         const cyElements = [
           ...data.nodes.map(n => ({ data: n })),
           ...data.edges.map(e => ({ data: e })),
@@ -27,7 +29,27 @@ function UserGraph() {
       });
   }, []);
 
-  const layout = { name: 'circle' };
+  // Handle node selection
+  const handleNodeClick = (event) => {
+    const nodeId = event.target.id();
+    let newSelected = [...selectedNodes];
+    if (newSelected.length === 2) newSelected = [];
+    if (!newSelected.includes(nodeId)) newSelected.push(nodeId);
+    setSelectedNodes(newSelected);
+    if (newSelected.length === 2) {
+      // Fetch shortest path from backend
+      fetch(`${API}/shortest-path?source=${encodeURIComponent(newSelected[0])}&target=${encodeURIComponent(newSelected[1])}`)
+        .then(res => res.json())
+        .then(data => {
+          setShortestPath(data.path || []);
+        })
+        .catch(() => setShortestPath([]));
+    } else {
+      setShortestPath([]);
+    }
+  };
+
+  // Cytoscape style with path highlighting
   const style = [
     {
       selector: 'node',
@@ -40,6 +62,18 @@ function UserGraph() {
         'font-size': 16,
         width: 50,
         height: 50,
+      },
+    },
+    {
+      selector: 'node.selected',
+      style: {
+        'background-color': '#FF851B',
+      },
+    },
+    {
+      selector: 'node.path',
+      style: {
+        'background-color': '#2ECC40',
       },
     },
     {
@@ -56,7 +90,41 @@ function UserGraph() {
         'text-background-padding': 2,
       },
     },
+    {
+      selector: 'edge.path',
+      style: {
+        'line-color': '#2ECC40',
+        'target-arrow-color': '#2ECC40',
+        'width': 5,
+      },
+    },
   ];
+
+  // Add classes for selected/path nodes/edges
+  // Build set of consecutive node pairs in the path
+  const pathPairs = new Set();
+  for (let i = 0; i < shortestPath.length - 1; i++) {
+    pathPairs.add(`${shortestPath[i]}--${shortestPath[i + 1]}`);
+    pathPairs.add(`${shortestPath[i + 1]}--${shortestPath[i]}`); // undirected
+  }
+  const cyElements = elements.map(el => {
+    if (el.data.source && el.data.target) {
+      // edge
+      let classes = '';
+      if (pathPairs.has(`${el.data.source}--${el.data.target}`)) {
+        classes += 'path';
+      }
+      return { ...el, classes };
+    } else {
+      // node
+      let classes = '';
+      if (selectedNodes.includes(el.data.id)) classes += ' selected';
+      if (shortestPath.includes(el.data.id)) classes += ' path';
+      return { ...el, classes };
+    }
+  });
+
+  const layout = { name: 'circle' };
 
   if (loading) return <div>Loading graph...</div>;
   if (error) return <div>{error}</div>;
@@ -65,11 +133,17 @@ function UserGraph() {
   return (
     <div style={{ margin: '32px auto', maxWidth: 650, background: '#f8fafc', borderRadius: 12, padding: 24 }}>
       <h2 style={{ textAlign: 'center' }}>User Friendship Graph</h2>
+      <p style={{ textAlign: 'center', color: '#555' }}>Click two nodes to highlight the shortest path between them.</p>
       <CytoscapeComponent
-        elements={elements}
+        elements={cyElements}
         style={{ width: '600px', height: '600px' }}
         layout={layout}
         stylesheet={style}
+        cy={cy => {
+          cyRef.current = cy;
+          cy.off('tap', 'node');
+          cy.on('tap', 'node', handleNodeClick);
+        }}
       />
     </div>
   );

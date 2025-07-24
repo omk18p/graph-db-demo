@@ -52,40 +52,73 @@ app.post('/friendship', async (req, res) => {
   }
 });
 
-// Get friends and friends-of-friends
+// ✅ Corrected: Get friends and friends-of-friends (excluding self and direct friends)
 app.get('/friends/:name', async (req, res) => {
   const { name } = req.params;
   try {
     const result = await session.run(
       `MATCH (u:User {name: $name})-[:FRIEND]->(f:User)
-       OPTIONAL MATCH (f)-[:FRIEND]->(fof:User)
-       RETURN collect(DISTINCT f.name) AS friends, collect(DISTINCT fof.name) AS friendsOfFriends`,
+       WITH u, collect(f) AS directFriends
+       UNWIND directFriends AS f
+       MATCH (f)-[:FRIEND]->(fof:User)
+       WHERE NOT fof = u AND NOT fof IN directFriends
+       RETURN 
+         [friend IN directFriends | friend.name] AS friends,
+         collect(DISTINCT fof.name) AS friendsOfFriends`,
       { name }
     );
     const record = result.records[0];
     res.json({
-      friends: record.get('friends').filter(n => n !== name),
-      friendsOfFriends: record.get('friendsOfFriends').filter(n => n !== name)
+      friends: record.get('friends'),
+      friendsOfFriends: record.get('friendsOfFriends')
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Add this endpoint to return the full user-friend graph
+// Return full graph (nodes and edges)
 app.get('/graph', async (req, res) => {
   try {
-    // Get all users
     const usersResult = await session.run('MATCH (u:User) RETURN u.name AS name');
-    const nodes = usersResult.records.map(r => ({ id: r.get('name'), label: r.get('name') }));
+    const nodes = usersResult.records.map(r => ({
+      id: r.get('name'),
+      label: r.get('name')
+    }));
 
-    // Get all friendships (undirected, unique pairs)
     const edgesResult = await session.run(
       'MATCH (a:User)-[:FRIEND]->(b:User) WHERE a.name < b.name RETURN a.name AS source, b.name AS target'
     );
-    const edges = edgesResult.records.map(r => ({ source: r.get('source'), target: r.get('target'), label: 'friend' }));
+    const edges = edgesResult.records.map(r => ({
+      source: r.get('source'),
+      target: r.get('target'),
+      label: 'friend'
+    }));
 
     res.json({ nodes, edges });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Shortest path endpoint
+app.get('/shortest-path', async (req, res) => {
+  const { source, target } = req.query;
+  if (!source || !target) {
+    return res.status(400).json({ error: 'source and target are required' });
+  }
+  try {
+    const result = await session.run(
+      `MATCH (start:User {name: $source}), (end:User {name: $target}),
+       p = shortestPath((start)-[:FRIEND*]-(end))
+       RETURN [n IN nodes(p) | n.name] AS path`,
+      { source, target }
+    );
+    if (result.records.length === 0) {
+      return res.json({ path: [] });
+    }
+    const path = result.records[0].get('path');
+    res.json({ path });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -105,7 +138,8 @@ app.delete('/users/:name', async (req, res) => {
   }
 });
 
+// Start the server
 const PORT = 4000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-}); 
+});
